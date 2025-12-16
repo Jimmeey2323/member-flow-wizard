@@ -47,6 +47,26 @@ export default function Landing() {
     });
   }, [isDark]);
 
+  // Listen for auth state changes and redirect to dashboard when logged in
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (session?.user) {
+          window.location.href = '/dashboard';
+        }
+      }
+    );
+
+    // Check if already logged in
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        window.location.href = '/dashboard';
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
   const backgroundImage = useMotionTemplate`radial-gradient(125% 125% at 50% 0%, hsl(var(--background)) 50%, ${color})`;
 
   const handleLogin = () => {
