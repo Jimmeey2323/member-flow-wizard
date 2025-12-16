@@ -52,7 +52,7 @@ export default function Landing() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         if (session?.user) {
-          window.location.href = '/dashboard';
+          window.location.href = '/';
         }
       }
     );
@@ -60,7 +60,7 @@ export default function Landing() {
     // Check if already logged in
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        window.location.href = '/dashboard';
+        window.location.href = '/';
       }
     });
 
