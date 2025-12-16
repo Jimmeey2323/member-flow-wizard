@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { 
   Ticket, 
@@ -59,14 +59,6 @@ export default function Landing() {
     setLoading(true);
 
     try {
-      if (!supabase) {
-        toast({
-          title: "Error",
-          description: "Authentication service not available",
-          variant: "destructive",
-        });
-        return;
-      }
 
       if (isSignUp) {
         const { error } = await supabase.auth.signUp({
