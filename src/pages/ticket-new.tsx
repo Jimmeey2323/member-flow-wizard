@@ -49,25 +49,64 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient } from "@/lib/queryClient";
 import { ClientSearch } from "@/components/client-search";
 import { SessionSearch, type SelectedSession } from "@/components/session-search";
-import { TicketTemplates, TICKET_TEMPLATES, type TicketTemplate } from "@/components/ticket-templates";
-import {
-  CATEGORIES,
-  STUDIOS,
-  TRAINERS,
-  CLASSES,
-  PRIORITIES,
-} from "@/lib/constants";
-import type { InsertTicket } from "@shared/schema";
+import { TicketTemplates, type TicketTemplate } from "@/components/ticket-templates";
+import { supabase } from "@/integrations/supabase/client";
+import { PRIORITIES, CLIENT_MOODS, CLIENT_STATUSES, TRAINERS, CLASSES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
+
+// Types from Supabase
+interface Category {
+  id: string;
+  name: string;
+  code: string;
+  icon: string | null;
+  color: string | null;
+  defaultPriority: string | null;
+  slaHours: number | null;
+}
+
+interface Subcategory {
+  id: string;
+  name: string;
+  code: string;
+  categoryId: string;
+  defaultPriority: string | null;
+}
+
+interface DynamicField {
+  id: string;
+  uniqueId: string;
+  label: string;
+  fieldTypeId: string;
+  categoryId: string | null;
+  subcategoryId: string | null;
+  isRequired: boolean | null;
+  isHidden: boolean | null;
+  options: string[] | null;
+  defaultValue: string | null;
+  sortOrder: number | null;
+  fieldType?: {
+    name: string;
+    inputComponent: string;
+  };
+}
+
+interface Studio {
+  id: string;
+  name: string;
+  code: string;
+  address: any;
+}
 
 const ticketFormSchema = z.object({
   studioId: z.string().min(1, "Please select a studio"),
-  category: z.string().min(1, "Please select a category"),
-  subcategory: z.string().optional(),
+  categoryId: z.string().min(1, "Please select a category"),
+  subcategoryId: z.string().optional(),
   priority: z.string().default("medium"),
   title: z.string().min(5, "Title must be at least 5 characters"),
   description: z.string().min(10, "Description must be at least 10 characters"),
@@ -80,13 +119,7 @@ const ticketFormSchema = z.object({
   incidentDateTime: z.string().optional(),
   trainer: z.string().optional(),
   className: z.string().optional(),
-  location: z.string().optional(),
-  customerId: z.string().optional(),
-  classTime: z.string().optional(),
-  instructorContact: z.string().optional(),
   source: z.string().optional(),
-  urgency: z.string().optional(),
-  notes: z.string().optional(),
 }).passthrough();
 
 type TicketFormValues = z.infer<typeof ticketFormSchema>;
@@ -109,7 +142,7 @@ export default function NewTicket() {
   const [ticketNumber, setTicketNumber] = useState("");
   const [selectedClients, setSelectedClients] = useState<any[]>([]);
   const [selectedSessions, setSelectedSessions] = useState<SelectedSession[]>([]);
-  const [isAnalyzingSentiment, setIsAnalyzingSentiment] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     const generateTicketNumber = () => {
@@ -127,8 +160,8 @@ export default function NewTicket() {
     resolver: zodResolver(ticketFormSchema),
     defaultValues: {
       studioId: "",
-      category: "",
-      subcategory: "",
+      categoryId: "",
+      subcategoryId: "",
       priority: "medium",
       title: "",
       description: "",
@@ -144,173 +177,175 @@ export default function NewTicket() {
     },
   });
 
-  const selectedCategory = form.watch("category");
-  const selectedSubcategory = form.watch("subcategory");
+  const selectedCategoryId = form.watch("categoryId");
+  const selectedSubcategoryId = form.watch("subcategoryId");
 
-  const categoryId = useMemo(() => {
-    const category = CATEGORIES.find(c => c.name === selectedCategory);
-    return category?.id;
-  }, [selectedCategory]);
-
-  const { data: subcategoriesData = [] } = useQuery({
-    queryKey: ['/api/categories', categoryId, 'subcategories'],
+  // Fetch categories from Supabase
+  const { data: categories = [], isLoading: categoriesLoading } = useQuery({
+    queryKey: ['categories'],
     queryFn: async () => {
-      if (!categoryId) return [];
-      const response = await fetch(`/api/categories/${categoryId}/subcategories`);
-      if (!response.ok) throw new Error('Failed to fetch subcategories');
-      return response.json();
+      const { data, error } = await supabase
+        .from('categories')
+        .select('*')
+        .eq('isActive', true)
+        .order('sortOrder')
+        .order('name');
+      
+      if (error) throw error;
+      return data as Category[];
     },
-    enabled: !!categoryId
   });
 
-  const { data: dynamicFieldsData = [] } = useQuery({
-    queryKey: ['/api/categories', categoryId, 'fields', selectedSubcategory],
+  // Fetch subcategories based on selected category
+  const { data: subcategories = [], isLoading: subcategoriesLoading } = useQuery({
+    queryKey: ['subcategories', selectedCategoryId],
     queryFn: async () => {
-      if (!categoryId) return [];
-      const url = new URL(`/api/categories/${categoryId}/fields`, window.location.origin);
-      if (selectedSubcategory && selectedSubcategory !== 'All') {
-        url.searchParams.set('subcategoryId', selectedSubcategory);
+      if (!selectedCategoryId) return [];
+      
+      const { data, error } = await supabase
+        .from('subcategories')
+        .select('*')
+        .eq('categoryId', selectedCategoryId)
+        .eq('isActive', true)
+        .order('sortOrder')
+        .order('name');
+      
+      if (error) throw error;
+      return data as Subcategory[];
+    },
+    enabled: !!selectedCategoryId,
+  });
+
+  // Fetch dynamic fields based on selected subcategory (or category if no subcategory)
+  const { data: dynamicFields = [], isLoading: fieldsLoading } = useQuery({
+    queryKey: ['dynamicFields', selectedCategoryId, selectedSubcategoryId],
+    queryFn: async () => {
+      if (!selectedCategoryId) return [];
+      
+      let query = supabase
+        .from('dynamicFields')
+        .select(`
+          *,
+          fieldType:fieldTypes(name, inputComponent)
+        `)
+        .eq('isActive', true)
+        .eq('isHidden', false);
+      
+      // If subcategory is selected, filter by it
+      if (selectedSubcategoryId) {
+        query = query.eq('subcategoryId', selectedSubcategoryId);
+      } else {
+        // If no subcategory, get category-level fields (those with null subcategoryId)
+        query = query.eq('categoryId', selectedCategoryId).is('subcategoryId', null);
       }
-      const response = await fetch(url);
-      if (!response.ok) throw new Error('Failed to fetch fields');
-      return response.json();
+      
+      const { data, error } = await query.order('sortOrder');
+      
+      if (error) throw error;
+      return data as DynamicField[];
     },
-    enabled: !!categoryId
+    enabled: !!selectedCategoryId,
   });
 
-  const dynamicFields = useMemo(() => {
-    if (!dynamicFieldsData) return [];
-    const filtered = (dynamicFieldsData as any[])
-      .filter((f: any) => !f.isHidden)
-      .sort((a: any, b: any) => (a.sortOrder || 0) - (b.sortOrder || 0));
-    return filtered;
-  }, [dynamicFieldsData, selectedCategory, selectedSubcategory, categoryId]);
-
-  const subcategories = subcategoriesData as Array<{ id: string; name: string; code?: string; }>;
-
-  const { data: studiosData = [] } = useQuery({
-    queryKey: ['/api/studios'],
+  // Fetch studios from Supabase
+  const { data: studios = [], isLoading: studiosLoading } = useQuery({
+    queryKey: ['studios'],
     queryFn: async () => {
-      const response = await fetch('/api/studios');
-      if (!response.ok) throw new Error('Failed to fetch studios');
-      return response.json();
+      const { data, error } = await supabase
+        .from('studios')
+        .select('*')
+        .eq('isActive', true)
+        .order('name');
+      
+      if (error) throw error;
+      return data as Studio[];
     },
   });
 
-  const studios = studiosData.length > 0 ? studiosData : STUDIOS;
-
-  const showTrainerField = useMemo(() => {
-    const cats = ["Class Experience", "Instructor Related"];
-    return cats.includes(selectedCategory);
-  }, [selectedCategory]);
-
-  const showClassField = useMemo(() => {
-    const cats = ["Class Experience", "Instructor Related", "Special Programs"];
-    return cats.includes(selectedCategory);
-  }, [selectedCategory]);
-
-  const createTicketMutation = useMutation({
-    mutationFn: async (data: TicketFormValues) => {
-      const ticketData: Partial<InsertTicket> = {
-        studioId: data.studioId,
-        categoryId: categoryId,
-        subcategoryId: data.subcategory || undefined,
-        priority: data.priority,
-        title: data.title,
-        description: data.description,
-        customerName: data.customerName || undefined,
-        customerEmail: data.customerEmail || undefined,
-        customerPhone: data.customerPhone || undefined,
-        customerMembershipId: data.customerMembershipId || undefined,
-        customerStatus: data.customerStatus || undefined,
-        clientMood: data.clientMood || undefined,
-        incidentDateTime: data.incidentDateTime && data.incidentDateTime.trim() !== ""
-          ? new Date(data.incidentDateTime)
-          : undefined,
-        dynamicFieldData: (() => {
-          const dyn: Record<string, any> = {};
-          (dynamicFields || []).forEach((f: any) => {
-            const key = f.uniqueId || f.label;
-            const val = (data as any)[key];
-            if (val !== undefined && val !== "") dyn[key] = val;
-          });
-          if ((data as any).trainer) dyn.trainer = (data as any).trainer;
-          if ((data as any).className) dyn.className = (data as any).className;
-          return dyn;
-        })(),
-      };
-      return apiRequest("POST", "/api/tickets", ticketData).then(res => res.json());
-    },
-    onSuccess: () => {
-      toast({
-        title: "Ticket created successfully",
-        description: "Your ticket has been submitted and assigned.",
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/tickets"] });
-      navigate("/tickets");
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Error creating ticket",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
+  // Reset subcategory when category changes
+  useEffect(() => {
+    if (selectedCategoryId) {
+      form.setValue('subcategoryId', '');
+      // Set default priority from category
+      const category = categories.find(c => c.id === selectedCategoryId);
+      if (category?.defaultPriority) {
+        form.setValue('priority', category.defaultPriority);
+      }
+    }
+  }, [selectedCategoryId, categories, form]);
 
   const onSubmit = async (data: TicketFormValues) => {
     try {
-      setIsAnalyzingSentiment(true);
-      
-      let sentimentData = {
-        sentiment: 'neutral',
-        tags: ['support'],
-        summary: 'Support ticket',
+      setIsSubmitting(true);
+
+      // Build dynamic field data
+      const dynamicFieldData: Record<string, any> = {};
+      dynamicFields.forEach((field) => {
+        const value = (data as any)[field.uniqueId];
+        if (value !== undefined && value !== "") {
+          dynamicFieldData[field.uniqueId] = value;
+        }
+      });
+      if (data.trainer) dynamicFieldData.trainer = data.trainer;
+      if (data.className) dynamicFieldData.className = data.className;
+
+      const ticketData = {
+        ticketNumber,
+        studioId: data.studioId,
+        categoryId: data.categoryId,
+        subcategoryId: data.subcategoryId || null,
+        priority: data.priority,
+        title: data.title,
+        description: data.description,
+        customerName: data.customerName || null,
+        customerEmail: data.customerEmail || null,
+        customerPhone: data.customerPhone || null,
+        customerMembershipId: data.customerMembershipId || null,
+        customerStatus: data.customerStatus || null,
+        clientMood: data.clientMood || null,
+        incidentDateTime: data.incidentDateTime ? new Date(data.incidentDateTime).toISOString() : null,
+        dynamicFieldData,
+        source: data.source || 'in-person',
+        status: 'new',
       };
 
-      try {
-        const sentimentResponse = await apiRequest('POST', '/api/analyze-sentiment', {
-          title: data.title,
-          description: data.description,
-          clientMood: data.clientMood,
-        });
-        sentimentData = await sentimentResponse.json();
-      } catch (error) {
-        console.log('Sentiment analysis failed, using defaults:', error);
-      }
+      const { data: ticket, error } = await supabase
+        .from('tickets')
+        .insert([ticketData])
+        .select()
+        .single();
 
-      const enrichedData = {
-        ...data,
-        sentiment: sentimentData.sentiment,
-        tags: sentimentData.tags,
-        clientIds: selectedClients.map(c => (c.id !== undefined && c.id !== null) ? String(c.id) : c.id),
-        sessionIds: selectedSessions.map(s => (s.id !== undefined && s.id !== null) ? String(s.id) : s.id),
-        sessionNames: selectedSessions.map(s => s.name),
-      };
+      if (error) throw error;
 
-      createTicketMutation.mutate(enrichedData);
-    } catch (error) {
-      console.error('Error in submission:', error);
       toast({
-        title: "Error",
-        description: "Failed to process ticket submission",
+        title: "Ticket created successfully",
+        description: `Ticket ${ticketNumber} has been submitted.`,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      navigate("/tickets");
+    } catch (error: any) {
+      console.error('Error creating ticket:', error);
+      toast({
+        title: "Error creating ticket",
+        description: error.message || "Failed to create ticket",
         variant: "destructive",
       });
     } finally {
-      setIsAnalyzingSentiment(false);
+      setIsSubmitting(false);
     }
   };
 
   const handleTemplateSelect = (template: TicketTemplate) => {
     setSelectedTemplate(template);
-    form.setValue("category", template.category);
+    // Find category by name
+    const category = categories.find(c => c.name === template.category);
+    if (category) {
+      form.setValue("categoryId", category.id);
+    }
     form.setValue("priority", template.priority);
     form.setValue("title", template.suggestedTitle);
     form.setValue("description", template.suggestedDescription);
-    if (template.subcategory) {
-      const sub = subcategories.find(s => s.name === template.subcategory);
-      if (sub) form.setValue("subcategory", sub.id);
-    }
   };
 
   const handleClientSelect = (client: any) => {
@@ -325,7 +360,7 @@ export default function NewTicket() {
         form.setValue("customerName", `${client.firstName || ''} ${client.lastName || ''}`.trim() || "");
         form.setValue("customerEmail", client.email || "");
         form.setValue("customerPhone", client.phone || "");
-        form.setValue("customerMembershipId", client.id !== undefined && client.id !== null ? String(client.id) : "");
+        form.setValue("customerMembershipId", client.id !== undefined ? String(client.id) : "");
         form.setValue("customerStatus", client.membershipStatus || "");
       }
     }
@@ -352,6 +387,71 @@ export default function NewTicket() {
   };
 
   const progress = (currentStep / 4) * 100;
+
+  // Render dynamic field based on field type
+  const renderDynamicField = (field: DynamicField) => {
+    const fieldTypeName = field.fieldType?.name || '';
+    const inputComponent = field.fieldType?.inputComponent || 'Input';
+
+    return (
+      <FormField
+        key={field.uniqueId}
+        control={form.control}
+        name={field.uniqueId as any}
+        render={({ field: formField }) => (
+          <FormItem>
+            <FormLabel>
+              {field.label}
+              {field.isRequired && <span className="text-destructive ml-1">*</span>}
+            </FormLabel>
+            <FormControl>
+              {inputComponent === 'Select' || fieldTypeName === 'Dropdown' ? (
+                <Select
+                  onValueChange={formField.onChange}
+                  value={(formField.value as string) || ''}
+                >
+                  <SelectTrigger className="rounded-xl bg-background">
+                    <SelectValue placeholder={`Select ${field.label.toLowerCase()}`} />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover border border-border z-50">
+                    {field.options?.map((opt, idx) => (
+                      <SelectItem key={idx} value={opt}>
+                        {opt}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : inputComponent === 'Textarea' || fieldTypeName === 'Long Text' ? (
+                <Textarea
+                  placeholder={`Enter ${field.label.toLowerCase()}`}
+                  value={(formField.value as string) || ''}
+                  onChange={formField.onChange}
+                  className="rounded-xl"
+                />
+              ) : inputComponent === 'Checkbox' || fieldTypeName === 'Checkbox' ? (
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    checked={formField.value === 'Yes' || formField.value === true}
+                    onCheckedChange={(checked) => formField.onChange(checked ? 'Yes' : 'No')}
+                  />
+                  <span className="text-sm text-muted-foreground">Yes</span>
+                </div>
+              ) : (
+                <Input
+                  type={fieldTypeName === 'Email' ? 'email' : fieldTypeName === 'Phone' ? 'tel' : 'text'}
+                  placeholder={`Enter ${field.label.toLowerCase()}`}
+                  value={(formField.value as string) || ''}
+                  onChange={formField.onChange}
+                  className="rounded-xl"
+                />
+              )}
+            </FormControl>
+            <FormMessage />
+          </FormItem>
+        )}
+      />
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-muted/20">
@@ -514,23 +614,30 @@ export default function NewTicket() {
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-6">
+                      {/* Category Selection */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <FormField
                           control={form.control}
-                          name="category"
+                          name="categoryId"
                           render={({ field }) => (
                             <FormItem>
                               <FormLabel>Category *</FormLabel>
                               <Select onValueChange={field.onChange} value={field.value}>
                                 <FormControl>
-                                  <SelectTrigger className="rounded-xl">
-                                    <SelectValue placeholder="Select category" />
+                                  <SelectTrigger className="rounded-xl bg-background">
+                                    <SelectValue placeholder={categoriesLoading ? "Loading..." : "Select category"} />
                                   </SelectTrigger>
                                 </FormControl>
-                                <SelectContent>
-                                  {CATEGORIES.map((cat) => (
-                                    <SelectItem key={cat.id} value={cat.name}>
-                                      {cat.name}
+                                <SelectContent className="bg-popover border border-border z-50">
+                                  {categories.map((cat) => (
+                                    <SelectItem key={cat.id} value={cat.id}>
+                                      <span className="flex items-center gap-2">
+                                        <span 
+                                          className="w-2 h-2 rounded-full" 
+                                          style={{ backgroundColor: cat.color || '#3B82F6' }}
+                                        />
+                                        {cat.name}
+                                      </span>
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
@@ -540,20 +647,21 @@ export default function NewTicket() {
                           )}
                         />
 
-                        {subcategories.length > 0 && (
+                        {/* Subcategory Selection - only show if category is selected and has subcategories */}
+                        {selectedCategoryId && (
                           <FormField
                             control={form.control}
-                            name="subcategory"
+                            name="subcategoryId"
                             render={({ field }) => (
                               <FormItem>
                                 <FormLabel>Subcategory</FormLabel>
                                 <Select onValueChange={field.onChange} value={field.value}>
                                   <FormControl>
-                                    <SelectTrigger className="rounded-xl">
-                                      <SelectValue placeholder="Select subcategory" />
+                                    <SelectTrigger className="rounded-xl bg-background">
+                                      <SelectValue placeholder={subcategoriesLoading ? "Loading..." : subcategories.length === 0 ? "No subcategories" : "Select subcategory"} />
                                     </SelectTrigger>
                                   </FormControl>
-                                  <SelectContent>
+                                  <SelectContent className="bg-popover border border-border z-50">
                                     {subcategories.map((sub) => (
                                       <SelectItem key={sub.id} value={sub.id}>
                                         {sub.name}
@@ -568,6 +676,7 @@ export default function NewTicket() {
                         )}
                       </div>
 
+                      {/* Priority Selection */}
                       <FormField
                         control={form.control}
                         name="priority"
@@ -606,6 +715,7 @@ export default function NewTicket() {
                         )}
                       />
 
+                      {/* Title */}
                       <FormField
                         control={form.control}
                         name="title"
@@ -624,6 +734,7 @@ export default function NewTicket() {
                         )}
                       />
 
+                      {/* Description */}
                       <FormField
                         control={form.control}
                         name="description"
@@ -642,79 +753,78 @@ export default function NewTicket() {
                         )}
                       />
 
-                      {/* Dynamic Fields */}
+                      {/* Dynamic Fields based on subcategory */}
                       {dynamicFields.length > 0 && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {dynamicFields.map((field: any) => {
-                            const skipFields = ['Ticket ID', 'Date & Time Reported', 'Date & Time of Incident', 'Priority', 'Issue Title', 'Issue Description', 'Category', 'Sub Category'];
-                            if (skipFields.includes(field.label)) return null;
-
-                            const fieldTypeName = typeof field.fieldType === 'string' 
-                              ? field.fieldType 
-                              : (field.fieldType?.name || '');
-
-                            return (
-                              <FormField
-                                key={field.uniqueId}
-                                control={form.control}
-                                name={field.uniqueId}
-                                render={({ field: formField }) => (
-                                  <FormItem>
-                                    <FormLabel>{field.label}</FormLabel>
-                                    <FormControl>
-                                      {fieldTypeName === 'Dropdown' && field.options ? (
-                                        <Select
-                                          onValueChange={formField.onChange}
-                                          value={(formField.value as string) || ''}
-                                        >
-                                          <SelectTrigger className="rounded-xl">
-                                            <SelectValue placeholder={`Select ${field.label.toLowerCase()}`} />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {(Array.isArray(field.options) 
-                                              ? field.options 
-                                              : field.options.split('|')
-                                            )
-                                              .map((opt: string) => opt.trim())
-                                              .filter((opt: string) => opt.length > 0)
-                                              .map((opt: string, idx: number) => (
-                                                <SelectItem key={idx} value={opt}>
-                                                  {opt}
-                                                </SelectItem>
-                                              ))}
-                                          </SelectContent>
-                                        </Select>
-                                      ) : fieldTypeName === 'Textarea' || fieldTypeName === 'Long Text' ? (
-                                        <Textarea
-                                          placeholder={`Enter ${field.label.toLowerCase()}`}
-                                          value={(formField.value as string) || ''}
-                                          onChange={formField.onChange}
-                                          className="rounded-xl"
-                                        />
-                                      ) : (
-                                        <Input
-                                          type={fieldTypeName === 'Email' ? 'email' : fieldTypeName === 'Phone' ? 'tel' : 'text'}
-                                          placeholder={`Enter ${field.label.toLowerCase()}`}
-                                          value={(formField.value as string) || ''}
-                                          onChange={formField.onChange}
-                                          className="rounded-xl"
-                                        />
-                                      )}
-                                    </FormControl>
-                                    <FormMessage />
-                                  </FormItem>
-                                )}
-                              />
-                            );
-                          })}
+                        <div className="border-t pt-6">
+                          <h4 className="text-sm font-semibold mb-4 flex items-center gap-2">
+                            <Zap className="h-4 w-4 text-primary" />
+                            Additional Information
+                            {fieldsLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {dynamicFields.map(renderDynamicField)}
+                          </div>
                         </div>
                       )}
+
+                      {/* Common contextual fields */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <FormField
+                          control={form.control}
+                          name="trainer"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Trainer/Instructor</FormLabel>
+                              <Select onValueChange={field.onChange} value={field.value}>
+                                <FormControl>
+                                  <SelectTrigger className="rounded-xl bg-background">
+                                    <SelectValue placeholder="Select trainer (if applicable)" />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent className="bg-popover border border-border z-50 max-h-60">
+                                  {TRAINERS.map((trainer) => (
+                                    <SelectItem key={trainer} value={trainer}>
+                                      {trainer}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name="className"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Class Name</FormLabel>
+                              <Select onValueChange={field.onChange} value={field.value}>
+                                <FormControl>
+                                  <SelectTrigger className="rounded-xl bg-background">
+                                    <SelectValue placeholder="Select class (if applicable)" />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent className="bg-popover border border-border z-50 max-h-60">
+                                  {CLASSES.map((cls) => (
+                                    <SelectItem key={cls} value={cls}>
+                                      {cls}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
                     </CardContent>
                   </Card>
                 </motion.div>
               )}
 
-              {/* Step 3: Context (Location & Customer) */}
+              {/* Step 3: Context - Studio & Customer */}
               {currentStep === 3 && (
                 <motion.div
                   key="step3"
@@ -726,8 +836,8 @@ export default function NewTicket() {
                   <Card className="glass-card">
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
-                        <MapPin className="h-5 w-5 text-emerald-500" />
-                        Location Information
+                        <MapPin className="h-5 w-5 text-primary" />
+                        Location & Context
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-6">
@@ -737,15 +847,15 @@ export default function NewTicket() {
                           name="studioId"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>Studio *</FormLabel>
+                              <FormLabel>Studio Location *</FormLabel>
                               <Select onValueChange={field.onChange} value={field.value}>
                                 <FormControl>
-                                  <SelectTrigger className="rounded-xl">
-                                    <SelectValue placeholder="Select studio" />
+                                  <SelectTrigger className="rounded-xl bg-background">
+                                    <SelectValue placeholder={studiosLoading ? "Loading..." : "Select studio"} />
                                   </SelectTrigger>
                                 </FormControl>
-                                <SelectContent>
-                                  {studios.map((studio: { id: string; name: string }) => (
+                                <SelectContent className="bg-popover border border-border z-50">
+                                  {studios.map((studio) => (
                                     <SelectItem key={studio.id} value={studio.id}>
                                       {studio.name}
                                     </SelectItem>
@@ -762,7 +872,7 @@ export default function NewTicket() {
                           name="incidentDateTime"
                           render={({ field }) => (
                             <FormItem>
-                              <FormLabel>When did this occur?</FormLabel>
+                              <FormLabel>Incident Date & Time</FormLabel>
                               <FormControl>
                                 <Input
                                   type="datetime-local"
@@ -775,60 +885,189 @@ export default function NewTicket() {
                           )}
                         />
                       </div>
-                    </CardContent>
-                  </Card>
 
-                  <Card className="glass-card">
-                    <CardHeader>
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="flex items-center gap-2">
-                          <User className="h-5 w-5 text-purple-500" />
-                          Customer Information
-                          {selectedClients.length > 0 && (
-                            <Badge variant="secondary" className="ml-2">
-                              {selectedClients.length} selected
-                            </Badge>
-                          )}
-                        </CardTitle>
-                        <Button
-                          type="button"
-                          variant={showCustomerBlock ? "secondary" : "outline"}
-                          size="sm"
-                          onClick={() => setShowCustomerBlock(!showCustomerBlock)}
-                          className="rounded-xl"
-                        >
-                          {showCustomerBlock ? "Hide" : "Add Customer"}
-                        </Button>
+                      {/* Customer Information */}
+                      <div className="border-t pt-6">
+                        <div className="flex items-center justify-between mb-4">
+                          <h4 className="text-sm font-semibold flex items-center gap-2">
+                            <User className="h-4 w-4 text-primary" />
+                            Customer Information
+                          </h4>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setShowCustomerBlock(!showCustomerBlock)}
+                            className="rounded-lg"
+                          >
+                            {showCustomerBlock ? "Hide" : "Add Customer Details"}
+                          </Button>
+                        </div>
+
+                        {showCustomerBlock && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="space-y-4"
+                          >
+                            <ClientSearch 
+                              onClientSelect={handleClientSelect}
+                              selectedClients={selectedClients}
+                            />
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <FormField
+                                control={form.control}
+                                name="customerName"
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>Customer Name</FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        placeholder="Full name"
+                                        className="rounded-xl"
+                                        {...field}
+                                      />
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name="customerEmail"
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>Email</FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        type="email"
+                                        placeholder="email@example.com"
+                                        className="rounded-xl"
+                                        {...field}
+                                      />
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name="customerPhone"
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>Phone</FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        placeholder="+91 XXXXX XXXXX"
+                                        className="rounded-xl"
+                                        {...field}
+                                      />
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name="customerStatus"
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>Customer Status</FormLabel>
+                                    <Select onValueChange={field.onChange} value={field.value}>
+                                      <FormControl>
+                                        <SelectTrigger className="rounded-xl bg-background">
+                                          <SelectValue placeholder="Select status" />
+                                        </SelectTrigger>
+                                      </FormControl>
+                                      <SelectContent className="bg-popover border border-border z-50">
+                                        {CLIENT_STATUSES.map((status) => (
+                                          <SelectItem key={status.value} value={status.value}>
+                                            {status.label}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name="clientMood"
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>Client Mood</FormLabel>
+                                    <Select onValueChange={field.onChange} value={field.value}>
+                                      <FormControl>
+                                        <SelectTrigger className="rounded-xl bg-background">
+                                          <SelectValue placeholder="How was the client feeling?" />
+                                        </SelectTrigger>
+                                      </FormControl>
+                                      <SelectContent className="bg-popover border border-border z-50">
+                                        {CLIENT_MOODS.map((mood) => (
+                                          <SelectItem key={mood.value} value={mood.value}>
+                                            {mood.label}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                            </div>
+                          </motion.div>
+                        )}
                       </div>
-                    </CardHeader>
-                    {showCustomerBlock && (
-                      <CardContent className="space-y-6">
-                        <ClientSearch
-                          onClientSelect={handleClientSelect}
-                          selectedClientId={selectedClients[0]?.id ? String(selectedClients[0].id) : undefined}
-                        />
 
-                        {selectedClients.length > 0 && (
-                          <div className="space-y-2">
-                            {selectedClients.map((client) => (
+                      {/* File Attachments */}
+                      <div className="border-t pt-6">
+                        <h4 className="text-sm font-semibold mb-4 flex items-center gap-2">
+                          <Paperclip className="h-4 w-4 text-primary" />
+                          Attachments
+                        </h4>
+                        <div className="border-2 border-dashed border-border rounded-xl p-6 text-center">
+                          <input
+                            type="file"
+                            multiple
+                            onChange={handleFileChange}
+                            className="hidden"
+                            id="file-upload"
+                            accept="image/*,.pdf,.doc,.docx"
+                          />
+                          <label
+                            htmlFor="file-upload"
+                            className="cursor-pointer flex flex-col items-center gap-2"
+                          >
+                            <Upload className="h-8 w-8 text-muted-foreground" />
+                            <span className="text-sm text-muted-foreground">
+                              Click to upload or drag files here
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              Max 5 files (Images, PDF, DOC)
+                            </span>
+                          </label>
+                        </div>
+                        {attachedFiles.length > 0 && (
+                          <div className="mt-4 space-y-2">
+                            {attachedFiles.map((file, index) => (
                               <div
-                                key={client.id}
-                                className="flex items-center justify-between p-3 rounded-xl bg-purple-500/10 border border-purple-500/20"
+                                key={index}
+                                className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
                               >
-                                <div>
-                                  <div className="font-medium text-sm">
-                                    {`${client.firstName || ''} ${client.lastName || ''}`.trim() || 'Unknown'}
-                                  </div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {client.email} • {client.phone}
-                                  </div>
-                                </div>
+                                <span className="text-sm truncate">{file.name}</span>
                                 <Button
                                   type="button"
                                   variant="ghost"
-                                  size="sm"
-                                  onClick={() => setSelectedClients(prev => prev.filter(c => c.id !== client.id))}
-                                  className="h-8 w-8 p-0"
+                                  size="icon"
+                                  onClick={() => removeFile(index)}
+                                  className="h-8 w-8"
                                 >
                                   <X className="h-4 w-4" />
                                 </Button>
@@ -836,103 +1075,7 @@ export default function NewTicket() {
                             ))}
                           </div>
                         )}
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <FormField
-                            control={form.control}
-                            name="customerName"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Customer Name</FormLabel>
-                                <FormControl>
-                                  <Input placeholder="Name" className="rounded-xl" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                          <FormField
-                            control={form.control}
-                            name="customerPhone"
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Phone</FormLabel>
-                                <FormControl>
-                                  <Input placeholder="Phone number" className="rounded-xl" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                          <FormField
-                            control={form.control}
-                            name="customerEmail"
-                            render={({ field }) => (
-                              <FormItem className="md:col-span-2">
-                                <FormLabel>Email</FormLabel>
-                                <FormControl>
-                                  <Input type="email" placeholder="Email address" className="rounded-xl" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        </div>
-                      </CardContent>
-                    )}
-                  </Card>
-
-                  {/* File Attachments */}
-                  <Card className="glass-card">
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Paperclip className="h-5 w-5 text-amber-500" />
-                        Attachments
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/50 transition-colors">
-                        <input
-                          type="file"
-                          multiple
-                          accept="image/*,.pdf,.doc,.docx"
-                          onChange={handleFileChange}
-                          className="hidden"
-                          id="file-upload"
-                        />
-                        <label htmlFor="file-upload" className="cursor-pointer">
-                          <Upload className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
-                          <p className="text-sm font-medium">Drop files here or click to upload</p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Support: Images, PDF, Word (max 5 files)
-                          </p>
-                        </label>
                       </div>
-
-                      {attachedFiles.length > 0 && (
-                        <div className="mt-4 space-y-2">
-                          {attachedFiles.map((file, index) => (
-                            <div
-                              key={index}
-                              className="flex items-center justify-between p-3 rounded-xl bg-muted/50"
-                            >
-                              <div className="flex items-center gap-3">
-                                <FileText className="h-5 w-5 text-muted-foreground" />
-                                <span className="text-sm truncate max-w-xs">{file.name}</span>
-                              </div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => removeFile(index)}
-                                className="h-8 w-8 p-0"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </CardContent>
                   </Card>
                 </motion.div>
@@ -950,70 +1093,74 @@ export default function NewTicket() {
                   <Card className="glass-card">
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
-                        <Check className="h-5 w-5 text-emerald-500" />
-                        Review Your Ticket
+                        <Check className="h-5 w-5 text-primary" />
+                        Review & Submit
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-6">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-4">
                           <div>
-                            <Label className="text-xs text-muted-foreground">Ticket ID</Label>
-                            <p className="font-mono font-semibold">{ticketNumber}</p>
-                          </div>
-                          <div>
-                            <Label className="text-xs text-muted-foreground">Category</Label>
-                            <p className="font-medium">{form.watch("category") || "Not selected"}</p>
-                          </div>
-                          <div>
-                            <Label className="text-xs text-muted-foreground">Priority</Label>
-                            <Badge className="mt-1">{form.watch("priority")}</Badge>
-                          </div>
-                          <div>
-                            <Label className="text-xs text-muted-foreground">Studio</Label>
+                            <span className="text-sm text-muted-foreground">Category</span>
                             <p className="font-medium">
-                              {studios.find((s: { id: string }) => s.id === form.watch("studioId"))?.name || "Not selected"}
+                              {categories.find(c => c.id === form.watch("categoryId"))?.name || "Not selected"}
+                            </p>
+                          </div>
+                          <div>
+                            <span className="text-sm text-muted-foreground">Subcategory</span>
+                            <p className="font-medium">
+                              {subcategories.find(s => s.id === form.watch("subcategoryId"))?.name || "None"}
+                            </p>
+                          </div>
+                          <div>
+                            <span className="text-sm text-muted-foreground">Priority</span>
+                            <p className="font-medium capitalize">{form.watch("priority")}</p>
+                          </div>
+                          <div>
+                            <span className="text-sm text-muted-foreground">Studio</span>
+                            <p className="font-medium">
+                              {studios.find(s => s.id === form.watch("studioId"))?.name || "Not selected"}
                             </p>
                           </div>
                         </div>
                         <div className="space-y-4">
                           <div>
-                            <Label className="text-xs text-muted-foreground">Title</Label>
+                            <span className="text-sm text-muted-foreground">Title</span>
                             <p className="font-medium">{form.watch("title") || "Not provided"}</p>
                           </div>
                           <div>
-                            <Label className="text-xs text-muted-foreground">Description</Label>
-                            <p className="text-sm text-muted-foreground line-clamp-4">
+                            <span className="text-sm text-muted-foreground">Description</span>
+                            <p className="font-medium text-sm line-clamp-3">
                               {form.watch("description") || "Not provided"}
                             </p>
                           </div>
-                          {selectedClients.length > 0 && (
+                          {form.watch("customerName") && (
                             <div>
-                              <Label className="text-xs text-muted-foreground">Customer</Label>
-                              <p className="font-medium">
-                                {`${selectedClients[0]?.firstName || ''} ${selectedClients[0]?.lastName || ''}`.trim()}
-                              </p>
+                              <span className="text-sm text-muted-foreground">Customer</span>
+                              <p className="font-medium">{form.watch("customerName")}</p>
                             </div>
                           )}
                         </div>
                       </div>
 
-                      {attachedFiles.length > 0 && (
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Attachments</Label>
-                          <p className="text-sm">{attachedFiles.length} file(s) attached</p>
+                      {/* Dynamic fields summary */}
+                      {dynamicFields.length > 0 && (
+                        <div className="border-t pt-4">
+                          <h4 className="text-sm font-semibold mb-3">Additional Details</h4>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                            {dynamicFields.map((field) => {
+                              const value = form.watch(field.uniqueId as any);
+                              if (!value) return null;
+                              return (
+                                <div key={field.uniqueId}>
+                                  <span className="text-xs text-muted-foreground">{field.label}</span>
+                                  <p className="text-sm font-medium">{String(value)}</p>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
-
-                      <div className="flex items-center gap-3 p-4 rounded-xl bg-primary/5 border border-primary/20">
-                        <Sparkles className="h-5 w-5 text-primary" />
-                        <div>
-                          <p className="text-sm font-medium">AI Analysis Enabled</p>
-                          <p className="text-xs text-muted-foreground">
-                            Sentiment analysis and auto-tagging will be applied on submission
-                          </p>
-                        </div>
-                      </div>
                     </CardContent>
                   </Card>
                 </motion.div>
@@ -1021,11 +1168,7 @@ export default function NewTicket() {
             </AnimatePresence>
 
             {/* Navigation Buttons */}
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="flex items-center justify-between pt-4"
-            >
+            <div className="flex items-center justify-between pt-4">
               <Button
                 type="button"
                 variant="outline"
@@ -1037,37 +1180,36 @@ export default function NewTicket() {
                 Previous
               </Button>
 
-              <div className="flex gap-3">
-                {currentStep < 4 ? (
-                  <Button
-                    type="button"
-                    onClick={nextStep}
-                    className="rounded-xl"
-                  >
-                    Next
-                    <ChevronRight className="h-4 w-4 ml-2" />
-                  </Button>
-                ) : (
-                  <Button
-                    type="submit"
-                    disabled={createTicketMutation.isPending || isAnalyzingSentiment}
-                    className="rounded-xl bg-gradient-to-r from-primary to-secondary hover:opacity-90"
-                  >
-                    {createTicketMutation.isPending || isAnalyzingSentiment ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        {isAnalyzingSentiment ? "Analyzing..." : "Creating..."}
-                      </>
-                    ) : (
-                      <>
-                        <Send className="h-4 w-4 mr-2" />
-                        Submit Ticket
-                      </>
-                    )}
-                  </Button>
-                )}
-              </div>
-            </motion.div>
+              {currentStep < 4 ? (
+                <Button
+                  type="button"
+                  onClick={nextStep}
+                  className="rounded-xl"
+                  disabled={currentStep === 1 && creationMode === "template" && !selectedTemplate}
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4 ml-2" />
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="rounded-xl bg-gradient-to-r from-primary to-secondary hover:opacity-90"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4 mr-2" />
+                      Create Ticket
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
           </form>
         </Form>
       </div>
