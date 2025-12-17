@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FileText,
@@ -22,6 +23,8 @@ import {
   Filter,
   LayoutGrid,
   List,
+  Loader2,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +51,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { TICKET_TEMPLATES, type TicketTemplate as BaseTicketTemplate } from "@/components/ticket-templates";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
 interface TicketTemplate extends BaseTicketTemplate {
   isCustom?: boolean;
@@ -342,12 +347,14 @@ const ALL_TEMPLATES: TicketTemplate[] = [...DEFAULT_TEMPLATES, ...ADDITIONAL_TEM
 export default function Templates() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const { user } = useAuth();
   const [templates, setTemplates] = useState<TicketTemplate[]>(ALL_TEMPLATES);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isCreatingTicket, setIsCreatingTicket] = useState(false);
   const [newTemplate, setNewTemplate] = useState({
     name: "",
     description: "",
@@ -358,7 +365,26 @@ export default function Templates() {
     tags: "",
   });
 
-  const categories = [...new Set(templates.map(t => t.category))];
+  // Fetch categories and studios for quick ticket creation
+  const { data: categories = [] } = useQuery({
+    queryKey: ['categories'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('categories').select('*').eq('isActive', true);
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const { data: studios = [] } = useQuery({
+    queryKey: ['studios'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('studios').select('*').eq('isActive', true);
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const templateCategories = [...new Set(templates.map(t => t.category))];
 
   const filteredTemplates = templates.filter(template => {
     const matchesSearch = 
@@ -369,6 +395,81 @@ export default function Templates() {
     const matchesPriority = priorityFilter === "all" || template.priority === priorityFilter;
     return matchesSearch && matchesCategory && matchesPriority;
   });
+
+  // Quick create ticket from template
+  const handleQuickCreate = async (template: TicketTemplate) => {
+    if (isCreatingTicket) return;
+    setIsCreatingTicket(true);
+
+    try {
+      // Generate ticket number
+      const now = new Date();
+      const year = now.getFullYear().toString().slice(-2);
+      const month = (now.getMonth() + 1).toString().padStart(2, '0');
+      const day = now.getDate().toString().padStart(2, '0');
+      const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+      const ticketNumber = `TKT-${year}${month}${day}-${random}`;
+
+      // Find matching category
+      const matchingCategory = categories.find(
+        (c: any) => c.name.toLowerCase().includes(template.category.toLowerCase().split(' ')[0]) ||
+             template.category.toLowerCase().includes(c.name.toLowerCase())
+      );
+
+      // Get first studio as default
+      const defaultStudio = studios[0];
+
+      if (!matchingCategory || !defaultStudio) {
+        toast({
+          title: "Configuration Required",
+          description: "Please ensure categories and studios are set up in the database.",
+          variant: "destructive",
+        });
+        setIsCreatingTicket(false);
+        return;
+      }
+
+      const { data: ticket, error } = await supabase
+        .from('tickets')
+        .insert([{
+          ticketNumber,
+          title: template.suggestedTitle,
+          description: template.suggestedDescription,
+          categoryId: matchingCategory.id,
+          studioId: defaultStudio.id,
+          priority: template.priority,
+          status: 'new',
+          source: 'template',
+          tags: template.tags || [],
+          reportedByUserId: user?.id,
+          dynamicFieldData: {
+            templateId: template.id,
+            templateName: template.name,
+          },
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      toast({
+        title: "Ticket Created from Template",
+        description: `Ticket ${ticketNumber} created. You can now edit the details.`,
+      });
+
+      // Navigate to the ticket to fill in specifics
+      navigate(`/tickets/${ticket.id}`);
+    } catch (error: any) {
+      console.error('Error creating ticket from template:', error);
+      toast({
+        title: "Error creating ticket",
+        description: error.message || "Failed to create ticket from template",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreatingTicket(false);
+    }
+  };
 
   const handleUseTemplate = (template: TicketTemplate) => {
     navigate(`/tickets/new?template=${template.id}`);
@@ -722,11 +823,25 @@ export default function Templates() {
                     )}>
                       <Button
                         size="sm"
+                        onClick={() => handleQuickCreate(template)}
+                        disabled={isCreatingTicket}
+                        className="rounded-lg bg-gradient-to-r from-primary to-secondary hover:opacity-90"
+                      >
+                        {isCreatingTicket ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <Zap className="h-3 w-3 mr-1" />
+                        )}
+                        Quick Create
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
                         onClick={() => handleUseTemplate(template)}
-                        className="rounded-lg flex-1"
+                        className="rounded-lg"
                       >
                         <Sparkles className="h-3 w-3 mr-1" />
-                        Use
+                        Customize
                       </Button>
                       <Button
                         size="sm"

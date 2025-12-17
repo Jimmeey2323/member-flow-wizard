@@ -95,11 +95,11 @@ interface FeedbackFormData {
   customerEmail: string;
 }
 
-const MOCK_TRAINERS: TrainerProfile[] = TRAINERS.map((trainer, index) => ({
+const TRAINER_PROFILES: TrainerProfile[] = TRAINERS.map((trainer, index) => ({
   id: trainer.id,
   name: trainer.name,
   avatar: undefined,
-  specialization: ["Barre", "Pilates", "Yoga", "HIIT", "Strength"][index % 5],
+  specialization: trainer.specialization,
   rating: 4.2 + (Math.random() * 0.8),
   totalFeedback: Math.floor(50 + Math.random() * 200),
   trend: ["up", "down", "stable"][Math.floor(Math.random() * 3)] as "up" | "down" | "stable",
@@ -123,6 +123,13 @@ const SCORE_CATEGORIES = [
   { key: "motivation", label: "Motivation", icon: Award },
   { key: "punctuality", label: "Punctuality", icon: Calendar },
   { key: "professionalism", label: "Professionalism", icon: User },
+];
+
+// Additional metrics for trainer evaluation
+const PERFORMANCE_METRICS = [
+  { key: "classAverage", label: "Class Average", icon: BarChart3 },
+  { key: "fillRate", label: "Fill Rate %", icon: Target },
+  { key: "conversion", label: "Conversion %", icon: TrendingUp },
 ];
 
 export function TrainerFeedbackModal({ open, onOpenChange }: TrainerFeedbackModalProps) {
@@ -152,7 +159,7 @@ export function TrainerFeedbackModal({ open, onOpenChange }: TrainerFeedbackModa
     customerEmail: "",
   });
 
-  const filteredTrainers = MOCK_TRAINERS.filter(trainer =>
+  const filteredTrainers = TRAINER_PROFILES.filter(trainer =>
     (trainer.name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
     (trainer.specialization ?? '').toLowerCase().includes(searchQuery.toLowerCase())
   );
