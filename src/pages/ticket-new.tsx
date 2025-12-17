@@ -667,9 +667,84 @@ export default function NewTicket() {
 
       if (error) throw error;
 
+      // Get studio name for notifications
+      const studioName = studios.find(s => s.id === data.studioId)?.name || '';
+
+      // Send email notifications
+      const notificationPromises: Promise<any>[] = [];
+
+      // Notify assignee if assigned
+      if (data.assignedToUserId && data.assignedToUserId !== '_auto') {
+        const assignee = users.find(u => u.id === data.assignedToUserId);
+        if (assignee?.email) {
+          notificationPromises.push(
+            supabase.functions.invoke('send-ticket-notification', {
+              body: {
+                type: 'assignment',
+                ticketNumber,
+                ticketTitle: data.title,
+                recipientEmail: assignee.email,
+                recipientName: assignee.displayName || assignee.email,
+                studioName,
+                priority: data.priority,
+                category: category?.name,
+                ticketUrl: `${window.location.origin}/tickets/${ticket.id}`,
+              }
+            }).catch(err => console.warn('Failed to send assignee notification:', err))
+          );
+        }
+      }
+
+      // Notify reporter
+      if (user?.email) {
+        notificationPromises.push(
+          supabase.functions.invoke('send-ticket-notification', {
+            body: {
+              type: 'status_change',
+              ticketNumber,
+              ticketTitle: data.title,
+              recipientEmail: user.email,
+              recipientName: user.firstName || user.email,
+              oldStatus: 'Draft',
+              newStatus: 'New',
+              studioName,
+              priority: data.priority,
+              ticketUrl: `${window.location.origin}/tickets/${ticket.id}`,
+            }
+          }).catch(err => console.warn('Failed to send reporter notification:', err))
+        );
+      }
+
+      // Notify customer if email provided
+      if (data.includeClientDetails && data.customerEmail) {
+        notificationPromises.push(
+          supabase.functions.invoke('send-ticket-notification', {
+            body: {
+              type: 'status_change',
+              ticketNumber,
+              ticketTitle: data.title,
+              recipientEmail: data.customerEmail,
+              recipientName: data.customerName || data.customerEmail,
+              oldStatus: 'Submitted',
+              newStatus: 'Received',
+              studioName,
+              priority: data.priority,
+              ticketUrl: `${window.location.origin}/tickets/${ticket.id}`,
+            }
+          }).catch(err => console.warn('Failed to send customer notification:', err))
+        );
+      }
+
+      // Send all notifications (don't block on them)
+      if (notificationPromises.length > 0) {
+        Promise.all(notificationPromises).catch(err => {
+          console.warn('Some notifications failed:', err);
+        });
+      }
+
       toast({
         title: "Ticket created successfully",
-        description: `Ticket ${ticketNumber} has been submitted.`,
+        description: `Ticket ${ticketNumber} has been submitted. Notifications sent.`,
       });
 
       queryClient.invalidateQueries({ queryKey: ['tickets'] });

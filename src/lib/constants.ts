@@ -10,16 +10,38 @@ export const STUDIOS = [
   { id: "popup", name: "Pop-up", city: "Various" },
 ] as const;
 
-// Trainers list
+// Trainers list - complete list with proper structure
 export const TRAINERS = [
-  "Anisha Shah", "Atulan Purohit", "Karanvir Bhatia", "Mrigakshi Jaiswal",
-  "Reshma Sharma", "Karan Bhatia", "Pushyank Nahar", "Shruti Kulkarni",
-  "Janhavi Jain", "Rohan Dahima", "Kajol Kanchan", "Vivaran Dhasmana",
-  "Upasna Paranjpe", "Richard D'Costa", "Pranjali Jain", "Saniya Jaiswal",
-  "Shruti Suresh", "Cauveri Vikrant", "Poojitha Bhaskar", "Nishanth Raj",
-  "Siddhartha Kusuma", "Simonelle De Vitre", "Kabir Varma", "Simran Dutt",
-  "Veena Narasimhan", "Anmol Sharma", "Bret Saldanha", "Raunak Khemuka",
-  "Chaitanya Nahar", "Sovena Shetty"
+  { id: "anisha-shah", name: "Anisha Shah", specialization: "Barre" },
+  { id: "atulan-purohit", name: "Atulan Purohit", specialization: "Pilates" },
+  { id: "janhavi-jain", name: "Janhavi Jain", specialization: "Yoga" },
+  { id: "karanvir-bhatia", name: "Karanvir Bhatia", specialization: "HIIT" },
+  { id: "karan-bhatia", name: "Karan Bhatia", specialization: "Strength" },
+  { id: "mrigakshi-jaiswal", name: "Mrigakshi Jaiswal", specialization: "Barre" },
+  { id: "pranjali-jain", name: "Pranjali Jain", specialization: "Pilates" },
+  { id: "reshma-sharma", name: "Reshma Sharma", specialization: "Yoga" },
+  { id: "richard-dcosta", name: "Richard D'Costa", specialization: "HIIT" },
+  { id: "rohan-dahima", name: "Rohan Dahima", specialization: "Strength" },
+  { id: "upasna-paranjpe", name: "Upasna Paranjpe", specialization: "Barre" },
+  { id: "kajol-kanchan", name: "Kajol Kanchan", specialization: "Pilates" },
+  { id: "pushyank-nahar", name: "Pushyank Nahar", specialization: "Yoga" },
+  { id: "shruti-kulkarni", name: "Shruti Kulkarni", specialization: "HIIT" },
+  { id: "vivaran-dhasmana", name: "Vivaran Dhasmana", specialization: "Strength" },
+  { id: "saniya-jaiswal", name: "Saniya Jaiswal", specialization: "Barre" },
+  { id: "shruti-suresh", name: "Shruti Suresh", specialization: "Pilates" },
+  { id: "cauveri-vikrant", name: "Cauveri Vikrant", specialization: "Yoga" },
+  { id: "poojitha-bhaskar", name: "Poojitha Bhaskar", specialization: "HIIT" },
+  { id: "nishanth-raj", name: "Nishanth Raj", specialization: "Strength" },
+  { id: "siddhartha-kusuma", name: "Siddhartha Kusuma", specialization: "Barre" },
+  { id: "simonelle-de-vitre", name: "Simonelle De Vitre", specialization: "Pilates" },
+  { id: "kabir-varma", name: "Kabir Varma", specialization: "Yoga" },
+  { id: "simran-dutt", name: "Simran Dutt", specialization: "HIIT" },
+  { id: "veena-narasimhan", name: "Veena Narasimhan", specialization: "Strength" },
+  { id: "anmol-sharma", name: "Anmol Sharma", specialization: "Barre" },
+  { id: "bret-saldanha", name: "Bret Saldanha", specialization: "Pilates" },
+  { id: "raunak-khemuka", name: "Raunak Khemuka", specialization: "HIIT" },
+  { id: "chaitanya-nahar", name: "Chaitanya Nahar", specialization: "Yoga" },
+  { id: "sovena-shetty", name: "Sovena Shetty", specialization: "Strength" },
 ] as const;
 
 // Classes
@@ -35,7 +57,6 @@ export const CLASSES = [
 ] as const;
 
 // Categories with their subcategories and default routing
-// Map of UUIDs to category data from actual Supabase database
 export const CATEGORIES = [
   {
     id: "f4b30263-d66b-4abc-8580-7ae5ad50204d",
@@ -196,4 +217,17 @@ export const DEPARTMENTS = [
   "IT/Tech Support",
   "HR",
   "Security",
+] as const;
+
+// Trainer feedback metrics
+export const TRAINER_FEEDBACK_METRICS = [
+  { key: "classAverage", label: "Class Average", description: "Average class rating" },
+  { key: "fillRate", label: "Fill Rate", description: "Percentage of class capacity filled" },
+  { key: "conversion", label: "Conversion", description: "Trial to member conversion rate" },
+  { key: "retention", label: "Retention", description: "Member retention rate" },
+  { key: "technique", label: "Technique", description: "Technical instruction quality" },
+  { key: "communication", label: "Communication", description: "Communication clarity" },
+  { key: "motivation", label: "Motivation", description: "Ability to motivate students" },
+  { key: "punctuality", label: "Punctuality", description: "Class start/end timing" },
+  { key: "professionalism", label: "Professionalism", description: "Professional conduct" },
 ] as const;

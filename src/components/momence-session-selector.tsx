@@ -57,9 +57,11 @@ export function MomenceSessionSelector({ onSessionSelect, selectedSession }: Mom
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const { toast } = useToast();
 
   const loadSessions = useCallback(async () => {
+    if (isLoading) return;
     setIsLoading(true);
     try {
       const { data, error } = await supabase.functions.invoke("momence-api", {
@@ -68,11 +70,13 @@ export function MomenceSessionSelector({ onSessionSelect, selectedSession }: Mom
 
       if (error) throw error;
       
-      const validSessions = (data.payload || []).filter(
+      const validSessions = (data?.payload || []).filter(
         (s: MomenceSession) => !s.isCancelled && !s.isDraft
       );
       setSessions(validSessions);
       setFilteredSessions(validSessions);
+      setHasLoadedOnce(true);
+      console.log("Loaded sessions:", validSessions.length);
     } catch (error) {
       console.error("Error loading sessions:", error);
       toast({
@@ -83,13 +87,14 @@ export function MomenceSessionSelector({ onSessionSelect, selectedSession }: Mom
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, isLoading]);
 
+  // Auto-load sessions on first open or on mount
   useEffect(() => {
-    if (isOpen && sessions.length === 0) {
+    if (isOpen && !hasLoadedOnce) {
       loadSessions();
     }
-  }, [isOpen, sessions.length, loadSessions]);
+  }, [isOpen, hasLoadedOnce, loadSessions]);
 
   useEffect(() => {
     if (!searchQuery.trim()) {
