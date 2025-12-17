@@ -17,9 +17,12 @@ import {
   MoreVertical,
   History,
   UserPlus,
+  Lock,
+  FileCheck,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -45,7 +48,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PriorityBadge } from "@/components/priority-badge";
 import { StatusBadge } from "@/components/status-badge";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { supabase } from "@/integrations/supabase/client";
 import { STATUSES, PRIORITIES, STUDIOS, DEPARTMENTS } from "@/lib/constants";
 import type {
   Ticket,
@@ -65,16 +70,57 @@ export default function TicketDetail() {
   const [, params] = useRoute("/tickets/:id");
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const { user } = useAuth();
   const ticketId = params?.id;
 
   const [newComment, setNewComment] = useState("");
   const [isInternalNote, setIsInternalNote] = useState(false);
   const [activeTab, setActiveTab] = useState("comments");
+  const [resolutionSummary, setResolutionSummary] = useState("");
+  const [isClosingTicket, setIsClosingTicket] = useState(false);
 
   const { data: ticket, isLoading } = useQuery<TicketWithRelations>({
     queryKey: ["/api/tickets", ticketId],
     enabled: !!ticketId,
   });
+
+  // Check if current user is the assigned owner
+  const isTicketOwner = user?.id && ticket?.assignedToUserId === user.id;
+  const canCloseTicket = isTicketOwner || user?.role === 'admin' || user?.role === 'manager';
+
+  // Close ticket mutation
+  const closeTicketMutation = useMutation({
+    mutationFn: async (data: { resolutionSummary: string }) => {
+      const { error } = await supabase
+        .from('tickets')
+        .update({
+          status: 'closed',
+          resolutionSummary: data.resolutionSummary,
+          closedAt: new Date().toISOString(),
+          resolvedAt: new Date().toISOString(),
+        })
+        .eq('id', ticketId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast({ title: "Ticket closed successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/tickets", ticketId] });
+      setResolutionSummary("");
+    },
+    onError: () => {
+      toast({ title: "Failed to close ticket", variant: "destructive" });
+    },
+  });
+
+  const handleCloseTicket = () => {
+    if (!resolutionSummary.trim()) {
+      toast({ title: "Resolution summary is required", variant: "destructive" });
+      return;
+    }
+    setIsClosingTicket(true);
+    closeTicketMutation.mutate({ resolutionSummary: resolutionSummary.trim() });
+    setIsClosingTicket(false);
+  };
 
   const updateStatusMutation = useMutation({
     mutationFn: async (status: string) => {
@@ -625,6 +671,63 @@ export default function TicketDetail() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Resolution Section - Only visible to ticket owner/admin */}
+          {canCloseTicket && ticket.status !== 'closed' && (
+            <Card className="border-primary/50 bg-primary/5">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Lock className="h-5 w-5 text-primary" />
+                  Resolution (Owner Only)
+                </CardTitle>
+                <CardDescription>
+                  Complete this section to close the ticket
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label className="text-sm font-medium">Resolution Summary *</Label>
+                  <Textarea
+                    placeholder="Describe how the issue was resolved..."
+                    value={resolutionSummary}
+                    onChange={(e) => setResolutionSummary(e.target.value)}
+                    className="mt-2 min-h-24"
+                  />
+                </div>
+                <Button
+                  onClick={handleCloseTicket}
+                  disabled={!resolutionSummary.trim() || closeTicketMutation.isPending}
+                  className="w-full"
+                >
+                  {closeTicketMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <FileCheck className="h-4 w-4 mr-2" />
+                  )}
+                  Close Ticket
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {ticket.status === 'closed' && ticket.resolutionSummary && (
+            <Card className="border-green-500/50 bg-green-500/5">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg flex items-center gap-2 text-green-600">
+                  <CheckCircle className="h-5 w-5" />
+                  Resolution
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm whitespace-pre-wrap">{ticket.resolutionSummary}</p>
+                {ticket.closedAt && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Closed {format(new Date(ticket.closedAt), "PPp")}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>

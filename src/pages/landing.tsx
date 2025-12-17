@@ -180,7 +180,7 @@ export default function Landing() {
               <Button 
                 onClick={handleLogin} 
                 data-testid="button-login"
-                className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-300"
+                className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-300"
               >
                 Sign In
                 <ArrowRight className="ml-2 h-4 w-4" />
@@ -345,7 +345,7 @@ export default function Landing() {
               }}
             />
             <motion.div
-              className={`absolute w-96 h-96 rounded-full blur-3xl opacity-20 ${isDark ? 'bg-purple-500' : 'bg-purple-300'}`}
+              className={`absolute w-96 h-96 rounded-full blur-3xl opacity-20 ${isDark ? 'bg-blue-500' : 'bg-blue-300'}`}
               style={{ bottom: '-100px', right: '-100px' }}
               animate={{
                 x: [0, -50, 0],
@@ -414,7 +414,7 @@ export default function Landing() {
                 {/* Animated gradient background behind title - only in light mode */}
                 {!isDark && (
                   <motion.div
-                    className="absolute inset-0 rounded-2xl blur-2xl opacity-30 bg-gradient-to-r from-blue-300 to-purple-300"
+                    className="absolute inset-0 rounded-2xl blur-2xl opacity-30 bg-gradient-to-r from-blue-300 to-blue-400"
                     animate={{
                       opacity: [0.2, 0.4, 0.2],
                     }}

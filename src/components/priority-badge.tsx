@@ -26,7 +26,7 @@ const priorityConfig: Record<string, { label: string; className: string }> = {
 };
 
 export function PriorityBadge({ priority, className }: PriorityBadgeProps) {
-  const config = priorityConfig[priority.toLowerCase()] || priorityConfig.medium;
+  const config = priorityConfig[(priority ?? '').toLowerCase()] || priorityConfig.medium;
   
   return (
     <Badge

@@ -23,6 +23,7 @@ import Studios from "@/pages/studios";
 import Categories from "@/pages/categories";
 import Notifications from "@/pages/notifications";
 import Settings from "@/pages/settings";
+import Templates from "@/pages/templates";
 
 function AuthenticatedRoutes() {
   return (
@@ -32,6 +33,7 @@ function AuthenticatedRoutes() {
       <Route path="/tickets/new" component={NewTicket} />
       <Route path="/tickets/:id" component={TicketDetail} />
       <Route path="/analytics" component={Analytics} />
+      <Route path="/templates" component={Templates} />
       <Route path="/teams" component={Teams} />
       <Route path="/studios" component={Studios} />
       <Route path="/categories" component={Categories} />

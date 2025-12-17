@@ -240,6 +240,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/tickets/:id', async (req, res) => {
     try {
+      // Prefer Supabase (consistent with list endpoint), fall back to storage if needed
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('tickets')
+          .select(`
+            *,
+            category:categories(id, name, code, icon, color),
+            subcategory:subcategories(id, name, code),
+            studio:studios(id, name, code),
+            assignedTo:users!tickets_assignedToUserId_fkey(id, firstName, lastName, displayName, email),
+            reportedBy:users!tickets_reportedByUserId_fkey(id, firstName, lastName, displayName)
+          `)
+          .eq('id', req.params.id)
+          .single();
+
+        if (error && error.code !== 'PGRST116') throw error; // PGRST116: No rows found
+        if (data) return res.json(data);
+        // If not found by id, try by ticket number
+        const { data: byNumber, error: numberErr } = await supabase
+          .from('tickets')
+          .select(`
+            *,
+            category:categories(id, name, code, icon, color),
+            subcategory:subcategories(id, name, code),
+            studio:studios(id, name, code),
+            assignedTo:users!tickets_assignedToUserId_fkey(id, firstName, lastName, displayName, email),
+            reportedBy:users!tickets_reportedByUserId_fkey(id, firstName, lastName, displayName)
+          `)
+          .eq('ticketNumber', req.params.id)
+          .single();
+        if (numberErr && numberErr.code !== 'PGRST116') throw numberErr;
+        if (byNumber) return res.json(byNumber);
+        return res.status(404).json({ message: "Ticket not found" });
+      }
+
+      // Fallback: use storage (drizzle)
       let ticket = await storage.getTicket(req.params.id);
       if (!ticket) {
         ticket = await storage.getTicketByNumber(req.params.id);
@@ -415,7 +451,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(notifications);
     } catch (error) {
       console.error("Error fetching notifications:", error);
-      res.status(500).json({ message: "Failed to fetch notifications" });
+      // Graceful degrade: return empty list when DB is unreachable
+      res.json([]);
     }
   });
 
@@ -448,7 +485,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(stats);
     } catch (error) {
       console.error("Error fetching dashboard stats:", error);
-      res.status(500).json({ message: "Failed to fetch dashboard stats" });
+      // Safe defaults to avoid frontend errors when DB is down
+      res.json({
+        totalOpen: 0,
+        totalNew: 0,
+        resolvedToday: 0,
+        slaBreached: 0,
+        avgResolutionHours: 0,
+        byStatus: [],
+        byPriority: [],
+        byCategory: []
+      });
     }
   });
 
@@ -458,7 +505,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(analytics);
     } catch (error) {
       console.error("Error fetching analytics:", error);
-      res.status(500).json({ message: "Failed to fetch analytics" });
+      // Safe defaults
+      res.json({
+        ticketsByCategory: [],
+        ticketsByStudio: [],
+        ticketsByTeam: [],
+        ticketTrend: [],
+        resolutionTimeByPriority: [],
+        topCategories: []
+      });
     }
   });
 

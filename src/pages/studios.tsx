@@ -24,8 +24,8 @@ export default function Studios() {
 
   const filteredStudios = studios?.filter(
     (studio) =>
-      studio.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      studio.address?.toLowerCase().includes(searchQuery.toLowerCase())
+      (studio.name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (studio.address ?? '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   if (isLoading) {

@@ -1,13 +1,24 @@
 import express, { type Express } from "express";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(__dirname, "public");
-  if (!fs.existsSync(distPath)) {
-    throw new Error(
-      `Could not find the build directory: ${distPath}, make sure to build the client first`,
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+  const candidates = [
+    path.resolve(__dirname, "public"),
+    path.resolve(__dirname, "../public"),
+    path.resolve(process.cwd(), "public"),
+  ];
+
+  const distPath = candidates.find((p) => fs.existsSync(p));
+
+  if (!distPath) {
+    console.warn(
+      "Could not find a client build directory in expected locations. Static file serving is disabled. Build the client and place it in one of: server/public, ../public, or ./public",
     );
+    return;
   }
 
   app.use(express.static(distPath));

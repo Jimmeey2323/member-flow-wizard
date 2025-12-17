@@ -38,7 +38,7 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 };
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {
-  const config = statusConfig[status.toLowerCase()] || statusConfig.new;
+  const config = statusConfig[(status ?? '').toLowerCase()] || statusConfig.new;
   
   return (
     <Badge

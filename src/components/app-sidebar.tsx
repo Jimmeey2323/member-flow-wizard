@@ -10,6 +10,8 @@ import {
   Bell,
   BarChart3,
   Sparkles,
+  FileText,
+  Star,
 } from "lucide-react";
 import {
   Sidebar,
@@ -32,6 +34,7 @@ const mainNavItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "All Tickets", url: "/tickets", icon: Ticket },
   { title: "New Ticket", url: "/tickets/new", icon: Plus },
+  { title: "Templates", url: "/templates", icon: FileText },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
 ];
 
@@ -60,14 +63,13 @@ export function AppSidebar() {
       <SidebarHeader className="p-5 border-b border-border/50">
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-secondary shadow-lg shadow-primary/25">
+            <div className="flex h-11 w-11 items-center justify-center">
               <img 
                 src="/logo.png" 
                 alt="Physique 57" 
-                className="h-7 w-7 object-contain"
+                className="h-11 w-11 object-contain"
               />
             </div>
-            <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-emerald-500 border-2 border-sidebar animate-pulse" />
           </div>
           <div className="flex flex-col">
             <span className="font-bold text-sm gradient-text-accent">Physique 57</span>
@@ -98,7 +100,7 @@ export function AppSidebar() {
                         : "hover:bg-muted/50"
                     )}
                   >
-                    <Link href={item.url} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
+                    <Link href={item.url} data-testid={`nav-${(item.title ?? '').toLowerCase().replace(/\s+/g, "-")}`}>
                       <div className={cn(
                         "flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-300",
                         isActive(item.url) 
@@ -139,7 +141,7 @@ export function AppSidebar() {
                         : "hover:bg-muted/50"
                     )}
                   >
-                    <Link href={item.url} data-testid={`nav-${item.title.toLowerCase()}`}>
+                    <Link href={item.url} data-testid={`nav-${(item.title ?? '').toLowerCase()}`}>
                       <div className={cn(
                         "flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-300",
                         isActive(item.url) 
@@ -175,7 +177,7 @@ export function AppSidebar() {
                         : "hover:bg-muted/50"
                     )}
                   >
-                    <Link href={item.url} data-testid={`nav-${item.title.toLowerCase()}`}>
+                    <Link href={item.url} data-testid={`nav-${(item.title ?? '').toLowerCase()}`}>
                       <div className={cn(
                         "flex h-8 w-8 items-center justify-center rounded-lg transition-all duration-300",
                         isActive(item.url) 
@@ -205,7 +207,7 @@ export function AppSidebar() {
             </Avatar>
             <div className="flex flex-col flex-1 min-w-0">
               <span className="text-sm font-semibold truncate">
-                {user.firstName || user.email?.split("@")[0] || "User"}
+                {user.firstName || (user.email ?? '').split("@")[0] || "User"}
               </span>
               <span className="text-xs text-muted-foreground truncate">
                 {user.role || "Staff"}

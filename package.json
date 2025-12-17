@@ -4,7 +4,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "NODE_ENV=development tsx server/index.ts",
+    "dev": "NODE_ENV=development NODE_OPTIONS=--dns-result-order=ipv4first tsx server/index.ts",
     "build:dev": "vite build --mode development",
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",

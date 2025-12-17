@@ -89,10 +89,10 @@ export function SessionSearch({ onSessionsSelect, selectedSessions = [], locatio
   const filteredSessions = sessions.filter(session => {
     const query = searchQuery.toLowerCase();
     return (
-      session.name?.toLowerCase().includes(query) ||
-      session.teacher?.firstName?.toLowerCase().includes(query) ||
-      session.teacher?.lastName?.toLowerCase().includes(query) ||
-      session.description?.toLowerCase().includes(query)
+      (session.name ?? '').toLowerCase().includes(query) ||
+      (session.teacher?.firstName ?? '').toLowerCase().includes(query) ||
+      (session.teacher?.lastName ?? '').toLowerCase().includes(query) ||
+      (session.description ?? '').toLowerCase().includes(query)
     );
   });
 

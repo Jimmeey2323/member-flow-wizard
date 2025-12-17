@@ -37,9 +37,9 @@ export default function Categories() {
 
   const filteredCategories = CATEGORIES.filter(
     (cat) =>
-      cat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (cat.name ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       cat.subcategories.some((sub) =>
-        sub.toLowerCase().includes(searchQuery.toLowerCase())
+        (sub ?? '').toLowerCase().includes(searchQuery.toLowerCase())
       )
   );
 
